@@ -15,7 +15,7 @@ function EmailForm({phishingCheck, onButtonClick} : {phishingCheck: PhishingChec
 
   const email = phishingCheck.email;
   const warnings = phishingCheck.warnings;
-  console.log(warnings);
+  
   const rows = Object.entries(email).map(([key, originalValue]) => {
     const keyWarningReasons = KeyToReasons[key] ?? [];
     const relatedWarnings = warnings.filter((w) => {
@@ -25,35 +25,17 @@ function EmailForm({phishingCheck, onButtonClick} : {phishingCheck: PhishingChec
 
     let value = originalValue;
     relatedWarnings.forEach((w) => {
-      switch (w.reason) {
-        case PhishingWarningReason.DomainName:
-          if(!w.domainName) break;
-          const domainName = w.domainName;
-          value = value.replace(
-            domainName,
-            `<span className='warning-text'>${domainName}</span>`
-          );
-          break;
-        case PhishingWarningReason.Link:
-          if(!w.link) break;
-          const link = w.link;
-          value = value.replace(
-            link,
-            `<span className='warning-text'>${link}</span>`
-          );
-          break;
-        case PhishingWarningReason.SuspiciousPhrase:
-          if(!w.sentence) break;
-          const sentence = w.sentence;
-          value = value.replace(
-            sentence,
-            `<span className='warning-text'>${sentence}</span>`
-          );
-          break;
+      if(w.highlight) {
+        const highlight = w.highlight;
+        value = value.replace(
+          highlight,
+          `<span className='warning-text'>${highlight}</span>`
+        );
       }
     });
+
     const warningBlocks = relatedWarnings.map((w, index) => {
-        return <div key={index} className="content-row__warning">{w.comment}</div>;
+        return <div key={index} className="content-row__warning">{"> " + w.comment}</div>;
     });
 
     return (

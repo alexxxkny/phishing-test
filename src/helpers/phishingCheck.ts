@@ -1,5 +1,6 @@
 import Email from "./email";
 import data from '../data/suspicious.json';
+import moment from "moment";
 
 const LinkRegExp = /https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*)/;
 const DomainRegExp = /@(\w+.\w{2,3})$/;
@@ -13,7 +14,10 @@ export enum PhishingWarningReason {
     DomainName,
     Link,
     Attachment,
-    SuspiciousPhrase
+    SuspiciousPhrase,
+    TimeTravel,
+    DifferentNameInText,
+    DifferentNameInReceiver
 }
 
 interface IKeyToReasons {
@@ -23,7 +27,8 @@ interface IKeyToReasons {
 export const KeyToReasons: IKeyToReasons = {
     'from_email': [PhishingWarningReason.DomainName],
     'from_name': [PhishingWarningReason.DomainName],
-    'text': [PhishingWarningReason.Link, PhishingWarningReason.SuspiciousPhrase],
+    'to_name': [PhishingWarningReason.DifferentNameInReceiver],
+    'text': [PhishingWarningReason.Link, PhishingWarningReason.SuspiciousPhrase, PhishingWarningReason.TimeTravel, PhishingWarningReason.DifferentNameInText],
     'attachment': [PhishingWarningReason.Attachment]
 }
 
@@ -32,9 +37,7 @@ export class PhishingCheck {
     readonly warnings: {
         reason: PhishingWarningReason,
         comment: string,
-        domainName?: string,
-        link?: string,
-        sentence?: string
+        highlight?: string,
     }[]
 
     constructor(email: Email) {
@@ -56,7 +59,7 @@ export class PhishingCheck {
         if (!senderNameContainsDomainName) {
             this.warnings.push({
                 reason: PhishingWarningReason.DomainName,
-                domainName: domainName,
+                highlight: domainName,
                 comment: "Похоже что почтовый домен не принадлежит указанной компании, это может говорить о том, что письмо поддельное!"
             });
         }
@@ -69,7 +72,7 @@ export class PhishingCheck {
             if (!linkContainsMailDomain) {
                 this.warnings.push({
                     reason: PhishingWarningReason.Link,
-                    link: link,
+                    highlight: link,
                     comment: "Похоже что домен ссылки в сообщении отличается от домена компании, это может говорить о том, что это вредоносная ссылка!"
                 });
             }
@@ -77,18 +80,55 @@ export class PhishingCheck {
 
         // Searching for sentances with suspicious phrases
         data.suspiciousPhrases.forEach(({phrase, comment}) => {
-            const phraseSentenseRegExp = new RegExp(`\\. ([\\p{sc=Cyrillic}\\s]*${phrase}[\\p{sc=Cyrillic}\\s]*\\.)`, 'u');
+            const phraseSentenseRegExp = new RegExp(`\\. ([\\p{sc=Cyrillic}\\s]*${phrase}[\\p{sc=Cyrillic}\\s]*(\\.|!{3}))`, 'u');
             const sentenceMatch = this.email.text.match(phraseSentenseRegExp);
 
             if (typeof sentenceMatch?.[1] === "string") {
                 const sentence = sentenceMatch[1];
                 this.warnings.push({
                     reason: PhishingWarningReason.SuspiciousPhrase,
-                    sentence: sentence,
+                    highlight: sentence,
                     comment: comment
                 });
             }
         });
+
+        // Date check
+        const dateRegExp = /\d{2}.\d{2}.\d{4}/;
+        const dateMatch = this.email.text.match(dateRegExp);
+        if(dateMatch) {
+            const textDate = moment(dateMatch[0], 'DD.MM.YYYY').toDate();
+            const date = new Date(this.email.date);
+            if (textDate > date) {
+                this.warnings.push({
+                    reason: PhishingWarningReason.TimeTravel,
+                    highlight: dateMatch[0],
+                    comment: "Они знают будущее! ШОК!"
+                })    
+            }
+        }
+
+        //Name check
+        const textNameRegExp = /^Уважаемый\s([\p{sc=Cyrillic}]+),/u;
+        const receiverNameRegExp = /^(\p{sc=Cyrillic}+)\s/u;
+        const textNameMatch = this.email.text.match(textNameRegExp);
+        const receiverNameMatch = this.email.to_name.match(receiverNameRegExp);
+        if(textNameMatch && receiverNameMatch) {
+            const textName = textNameMatch[1]
+            const receiverName = receiverNameMatch[1];
+            if(textName !== receiverName) {
+                this.warnings.push({
+                    reason: PhishingWarningReason.DifferentNameInText,
+                    highlight: textName,
+                    comment: "Имя получателя и имя обращения различаются!"
+                });
+                this.warnings.push({
+                    reason: PhishingWarningReason.DifferentNameInReceiver,
+                    highlight: receiverName,
+                    comment: "Имя получателя и имя обращения различаются!"
+                });
+            }
+        }
         
         // Attachment check
         if (this.email.attachment.length > 0) {
